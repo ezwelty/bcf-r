@@ -1,0 +1,150 @@
+---
+title: "Finances"
+author: "Ethan Welty"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(magrittr)
+library(dplyr)
+knitr::opts_chunk$set(fig.width = 12, fig.align = "center", out.width = "100%", echo = FALSE, warning = FALSE, message = FALSE)
+options(knitr.table.format = "html", knitr.kable.NA = "0") 
+ggplot2::theme_set(ggplot2::theme_minimal(base_size = 14))
+source("functions.R")
+source("passwords.R")
+```
+
+```{r orders, include=FALSE}
+pma_token <- pma_login(pma_user, pma_pass)
+tax_exempt_users <- c("saramolton16@gmail.com", "bonaishalom")
+orders <- get_orders(overwrite = FALSE, token = pma_token) %>%
+  dplyr::mutate(
+    tax_exempt = user_id %in% tax_exempt_users,
+    markup = sales - price_paid
+  ) %>%
+  dplyr::filter(
+    account_id != "bcf_internal"
+  )
+# Print new rows
+orders %>%
+  select(foodclub, order_date, account_id, user_id, price_paid, tax_paid, collected, sales, tax, food, tax_exempt) %>%
+  arrange(order_date, account_id, user_id) %>%
+  filter(order_date > as.Date("2017-08-07")) %>%
+  write.table("new_orders.tsv", quote = FALSE, na = "", sep = "\t", row.names = FALSE, col.names = FALSE)
+```
+
+### Order date range
+
+```{r}
+orders$order_date %>%
+  range() %>%
+  paste(collapse = " to ") %>%
+  cat()
+```
+
+### Average monthly order (by user)
+
+```{r}
+orders %>%
+  group_by(user_id) %>%
+  summarize(
+    price = sum(price_paid),
+    tax = sum(tax),
+    markup = sum(markup),
+    total = sum(collected),
+    months = 0.51 + as.numeric(diff(range(order_date)), units = "days") / 30.44
+  ) %>%
+  mutate_at(vars(-months, -user_id), funs(divide_by(., months))) %>%
+  mutate_if(is.numeric, round) %>%
+  arrange(-total) %>%
+  knitr::kable(digits = 0, format.args = list(big.mark = ",")) %>%
+  kableExtra::kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+### Order size (by supplier)
+
+```{r}
+orders %>%
+  group_by(account_id, order_date) %>%
+  summarize_if(is.numeric, sum) %>%
+  ungroup() %>%
+  mutate(
+    account_id = gsub("bcf_", "", account_id),
+    account_id = reorder(account_id, -price_paid, FUN = median)
+  ) %>%
+  ggplot(aes(account_id, price_paid)) +
+    geom_boxplot() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Order size (by user)
+
+```{r}
+orders %>%
+  group_by(user_id, order_date) %>%
+  summarize_if(is.numeric, sum) %>%
+  ungroup() %>%
+  mutate(
+    user_id = reorder(user_id, -price_paid, FUN = median)
+  ) %>%
+  ggplot(aes(user_id, price_paid)) +
+    geom_boxplot() + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+<!-- ### Order size (through time) -->
+
+<!-- ```{r, echo=FALSE} -->
+<!-- orders %>% -->
+<!--   group_by(account_id, order_date) %>% -->
+<!--   summarize_if(is.numeric, sum) %>% -->
+<!--   ggplot(aes(order_date, collected, color = account_id)) + -->
+<!--     geom_line() -->
+<!-- ``` -->
+
+### Monthy order (by supplier)
+
+```{r}
+totals <- orders %>%
+    mutate(month = as.Date(format(order_date, "%Y-%m-01"))) %>%
+    group_by(month) %>%
+    summarize_if(is.numeric, sum) %>%
+    mutate(account_id = "Total")
+orders %>%
+  mutate(
+    month = as.Date(format(order_date, "%Y-%m-01"))
+  ) %>%
+  group_by(account_id, month) %>%
+  summarize_if(is.numeric, sum) %>%
+  bind_rows(totals) %>%
+  ggplot(aes(month, price_paid, color = account_id)) +
+    geom_line(alpha = 0.5) +
+    geom_smooth(se = FALSE)
+```
+
+### Monthy order (by top users)
+
+```{r}
+top_users <- orders %>%
+  group_by(user_id) %>%
+  summarize_if(is.numeric, sum) %>%
+  filter(collected >= sort(collected, decreasing = TRUE)[7]) %$%
+  user_id
+orders %>%
+  filter(user_id %in% top_users) %>%
+  mutate(
+    month = as.Date(format(order_date, "%Y-%m-01"))
+  ) %>%
+  group_by(user_id, month) %>%
+  summarize_if(is.numeric, sum) %>%
+  ggplot(aes(month, price_paid, color = user_id)) +
+    geom_line(alpha = 0.4) +
+    geom_smooth(se = FALSE) +
+    scale_y_continuous(limits = c(0, 1000), oob = function(x, lim) {return(x)})
+```

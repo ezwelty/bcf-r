@@ -1,0 +1,335 @@
+library(magrittr)
+
+# Get elements by exact name only
+`$` <- function(x, name) {
+  name <- deparse(substitute(name))
+  x[[name, exact = TRUE]]
+}
+
+# ---- Foodclub (website) ----
+
+#' Login to Foodclub
+#' 
+#' @param username (character) Valid username.
+#' @param password (character) Valid password.
+#' @return An authorization token.
+#' @examples
+#' foodclub_login("username", "password")
+foodclub_login <- function(username, password) {
+  url <- "https://foodclub.org/bouldercoopfood/login"
+  response <- httr::POST(url, body = list(user_id = username, password = password, login = "Login"))
+  index_url <- "https://foodclub.org/bouldercoopfood/index"
+  if (httr::GET(index_url)$url == index_url) {
+    return(httr::handle_find(url))
+  } else {
+    stop("Login failed")
+  }
+}
+
+# ---- Foodclub (phpMyAdmin) ----
+
+#' Login to Foodclub phpMyAdmin
+#' 
+#' @param username (character) Valid username.
+#' @param password (character) Valid password.
+#' @return An authorization token.
+#' @examples
+#' pma_login("username", "password")
+pma_login <- function(username, password) {
+  url <- "https://foodclub.org/phpmyadmin/index.php"
+  body <- list(pma_username = username, pma_password = password)
+  response <- httr::POST(url, body = body)
+  token <- response$url %>%
+    httr::parse_url() %$% query %$% token
+  if (response$status_code != 200 || is.null(token)) {
+    stop("Login failed")
+  }
+  token
+}
+
+#' Get table via Foodclub phpMyAdmin
+#' 
+#' May be slow for very large tables since the function works by scraping HTML.
+#' 
+#' @param table (character) Name of the target database table.
+#' @param db (character) Name of the target database (default: \code{"foodclub"}).
+#' @param token (character) Authentication token from \code{\link{pma_login}}.
+#' @return The specified database table as a \link{\code{data.frame}}.
+#' @examples
+#' token <- pma_login("username", "password")
+#' pma_get_table("private_bcf_goldenorganics", token = token)
+pma_get_table <- function(table, db = "foodclub", token) {
+  url <- "https://foodclub.org/phpmyadmin/import.php"
+  query <- list(
+    token = token,
+    table = table,
+    db = db,
+    pos = 0,
+    goto = "tbl_sql.php",
+    sql_query = paste0("SELECT * FROM ", db, ".", table, " LIMIT 0, 999999;")
+  )
+  df <- httr::POST(url, query = query) %>%
+    httr::content() %>%
+    xml2::xml_find_first(xpath = "//table[@id = 'table_results']") %>%
+    rvest::html_table() %>%
+    subset(.[[2]] != "") %>% # Remove header rows
+    subset(select = -(1:4)) %>% # Remove non-data columns
+    lapply(readr::parse_guess, na = c("", "NULL")) %>%
+    as.data.frame(stringsAsFactors = FALSE)
+  if ("user_id" %in% names(df)) {
+    df$user_id %<>% parse_hex()
+  }
+  df
+}
+
+#' Parse Hex to String
+#' 
+#' @examples
+#' parse_hex(c("4f7374617261", "7069636b6c6562726963"))
+parse_hex <- function(x) {
+  sapply(x, function(s) {
+    seq(1, nchar(s), by = 2) %>%
+      sapply(function(x) substr(s, x, x + 1)) %>%
+      strtoi(base = 16L) %>%
+      as.raw() %>%
+      rawToChar()
+  }, USE.NAMES = FALSE)
+}
+
+#' Import CSV via Foodclub phpMyAdmin
+#' 
+#' NOTE: Expects a CSV file with column names in the first row which all correspond to Foodclub database schema fields.
+#' 
+#' @param import_file (character) Path of the csv file to import.
+#' @param table (character) Name of the target database table.
+#' @param db (character) Name of the target database (default: \code{"foodclub"}).
+#' @param csv_replace (boolean) Whether to delete existing table rows before import (default: \code{TRUE}).
+#' @param csv_columns (character) Names of the table fields corresponding to each column of the csv file (default: \code{names(read.csv(import_file)}).
+#' @param skip_queries (numeric) Number of lines of the csv file to skip (default: \code{1}).
+#' @param token (character) Authentication token from \code{\link{pma_login}}.
+#' @examples
+#' token <- pma_login("username", "password")
+#' pma_import_csv("file.csv", "table", token = token)
+pma_import_csv <- function(import_file, table, db = "foodclub", csv_replace = TRUE, csv_columns = names(read.csv(import_file)), skip_queries = 1, token) {
+  csv_columns <- paste(csv_columns, collapse = ",")
+  url <- "https://foodclub.org/phpmyadmin/import.php"
+  response <- httr::POST(url, body = c(mget(c("token", "table", "db", "csv_replace", "csv_columns", "skip_queries")), list(import_type = "table", format = "csv", charset_of_file = "utf-8", csv_terminated = ",", csv_enclosed = "\"", csv_escaped = "\"", csv_new_line = "auto", import_file = httr::upload_file(import_file))))
+  # Print query result
+  xml <- httr::content(response)
+  cat(xml2::xml_text(xml2::xml_find_first(xml, "//div[@id='result_query']")))
+}
+
+#' Write object to CSV for import via Foodclub phpMyAdmin
+#' 
+#' As expected by phpMyAdmin, \code{NA}s are written as NULL (without quotes) and row names are left out.
+#' 
+#' @param x (coercible to data.frame) Object to be written.
+#' @param file (character | \code{\link{connection}}) File to be written (default: "", output to the console).
+#' @param ... Arguments to \code{\link{write.csv}}.
+#' @examples
+#' x <- data.frame(code = c("a", "b"), price = c(10, NULL))
+#' pma_write_import_csv(x, "x.csv")
+pma_write_import_csv <- function(x, file = "", ...) {
+  write.csv(x, file = file, na = "NULL", row.names = FALSE, ...)
+  # Remove quotes from NULL
+  old_lines <- readLines(file)
+  new_lines <- gsub("\"NULL\"", "NULL", old_lines)
+  cat(new_lines, file = file, sep = "\n")
+}
+
+# ---- Finances ----
+
+#' Get Foodclub users (UNUSED)
+get_foodclub_users <- function(overwrite = FALSE, token) {
+  cache <- "users.rds"
+  if (overwrite || !file.exists(cache)) {
+    pma_get_table("custom_view_users_bouldercoopfood", token = token) %T>%
+      saveRDS(cache)
+  } else {
+    readRDS(cache)
+  }
+}
+
+#' Get Foodclub orders
+get_foodclub_orders <- function(overwrite = FALSE, token) {
+  cache <- "orders.rds"
+  if (overwrite || !file.exists(cache)) {
+    pma_get_table("custom_view_dw_archived_invoice_user_totals_bouldercoopfood", token = token) %T>%
+      saveRDS(cache)
+  } else {
+    readRDS(cache)
+  }
+}
+
+#' Parse Foodclub orders
+#' account_id | order_date | user_id | price_paid | tax_paid | collected | sales | tax | food | tax_exempt
+parse_foodclub_orders <- function(orders) {
+  
+  ## Check for accounting changes
+  if (any(orders$refunds != 0)) {
+    stop("Non-zero refund")
+  }
+  
+  ## Remove empty orders
+  orders <- orders[orders$pretax != 0, ]
+  
+  ## Reallocate Costco true-ups
+  # Early Costco orders lacked receipts, so percent fees were applied to match the charges on the debit card. Reallocate these fees to the price and tax paid by members:
+  true_up_orders <- list(
+    list(
+      account_id = "bcf_costco",
+      begin = as.Date("2017-02-08"),
+      end = as.Date("2017-04-29")
+    ),
+    list(
+      account_id = "bcf_costco_nf",
+      begin = as.Date("2017-02-08"),
+      end = as.Date("2017-04-29")
+    )
+  )
+  for (x in true_up_orders) {
+    ind <- with(orders, account_id == x$account_id & order_date >= x$begin & order_date <= x$end)
+    true_ups <- with(orders[ind, ], (overall_order - order_subtotal) /  order_subtotal)
+    modified <- orders[ind, ] %>%
+      dplyr::mutate(
+        pretax = pretax * (1 + true_ups),
+        tax = tax * (1 + true_ups),
+        overall_order = pretax + tax,
+        custom_fees = 0
+      )
+    err <- modified$overall_order - orders$overall_order[ind]
+    if (any(err >= 0.01)) {
+      stop("Change in order total larger than rounding error")
+    }
+    orders[ind, ] <- modified
+  }
+  
+  ## Move custom fees to member fees
+  # The first several months of orders used `custom_fees` for markups, rather than the standard `member_fees`. Reassign all custom fees as member fees:
+  custom_fee_orders <- list(
+    list(
+      begin = as.Date("2017-02-08"),
+      end = as.Date("2017-06-15")
+    )
+  )
+  for (x in custom_fee_orders) {
+    ind <- with(orders, order_date >= x$begin & order_date <= x$end)
+    orders[ind, ] %<>%
+      dplyr::mutate(
+        member_fees = custom_fees,
+        custom_fees = 0
+      )
+  }
+  if (any(orders$custom_fees != 0)) {
+    stop("Non-zero custom fees")
+  }
+  orders$custom_fees <- NULL
+  
+  ## Reassign misassigned orders
+  # Foodclub accounts do not always map perfectly to BCF membership. Reassign misassigned orders to the correct account:
+  misassigned_orders <- list(
+    # Loren Matilsky used his personal Foodclub account for Ostara orders before moving out.
+    list(
+      from = "illorenzo",
+      to = "Ostara",
+      begin = as.Date("2017-02-08"),
+      end = as.Date("2017-02-20")
+    )
+  )
+  for (x in misassigned_orders) {
+    ind <- with(orders, user_id == x$from & order_date >= x$begin & order_date <= x$end)
+    orders$user_id[ind] <- x$to
+  }
+  
+  ## Split out total-only orders
+  # The first few orders did not seperate price components. Reconstruct wholesale price, tax, and markup for these orders:
+  total_only_orders <- list(
+    list(
+      account_id = "bcf_goldenorganics",
+      date = as.Date("2017-02-08"),
+      markup = 0.1
+    ),
+    list(
+      account_id = "bcf_costco",
+      date = as.Date("2017-02-08"),
+      tax = 0.0346
+    ),
+    list(
+      account_id = "bcf_fiordilatte",
+      date = as.Date("2017-02-13"),
+      markup = 0.039803,
+      tax_applied = 0.08995
+    )
+  )
+  for (x in total_only_orders) {
+    built_in <- sum(x$markup, x$tax)
+    ind <- with(orders, account_id == x$account_id & order_date == x$date)
+    xtax <- sum(x$tax, x$tax_applied)
+    xmarkup <- sum(x$markup, x$markup_applied)
+    modified <- orders[ind, ] %>%
+      dplyr::mutate(
+        pretax = pretax / (1 + built_in),
+        tax = xtax * pretax,
+        member_fees = xmarkup * (pretax + tax),
+        overall_order = pretax + tax + member_fees
+      )
+    err <- modified$overall_order - orders$overall_order[ind]
+    if (any(err >= 0.01)) {
+      stop("Change in order total larger than rounding error")
+    }
+    orders[ind, ] <- modified
+  }
+  
+  # Precomputations
+  food_tax <- 0.0386
+  nonfood_tax <- 0.08845
+  tax_rate_paid_variable <- orders$tax / orders$pretax
+  tax_rate_paid_fixed <- c(bcf_costco = 0.0346, bcf_costco_nf = 0.08445) %>%
+    extract(orders$account_id) %>%
+    replace(is.na(.), 0) %>%
+    replace(orders$order_date >= as.Date("2017-06-10"), 0) %>%
+    set_names(NULL)
+  food_fraction <- (tax_rate_paid_variable - nonfood_tax) / (food_tax - nonfood_tax)
+  
+  ## Match template
+  orders %>%
+    dplyr::mutate(
+      price_paid = pretax,
+      tax_paid = price_paid * ifelse(
+        account_id == "bcf_frontiernaturalfoods",
+        tax_rate_paid_variable, tax_rate_paid_fixed
+      ),
+      food = ifelse(
+        account_id == "bcf_frontiernaturalfoods",
+        food_fraction, ifelse(
+          account_id == "bcf_costco_nf",
+          0, 1
+        )
+      ),
+      collected = overall_order,
+      sales = collected / (1 + food * (food_tax - nonfood_tax) + nonfood_tax),
+      tax = collected - sales
+    ) %>%
+    dplyr::select(account_id, order_date, user_id, price_paid, tax_paid, collected, sales, tax, food)
+}
+
+#' Get Pre-Foodclub orders
+get_prefoodclub_orders <- function() {
+  read.csv("prefoodclub_orders.csv", stringsAsFactors = FALSE, na.strings = "") %>%
+    dplyr::mutate(
+      order_date = as.Date(order_date),
+      user_id = ifelse(is.na(user_id), member, user_id)
+    ) %>%
+    dplyr::filter(price_paid > 0) %>%
+    dplyr::select(-tax_rate_paid, -fee_rate, -supplier, -member)
+}
+
+get_orders <- function(...) {
+  pre_orders <- get_prefoodclub_orders() %>%
+    dplyr::mutate(foodclub = FALSE)
+  orders <- get_foodclub_orders(...) %>%
+    parse_foodclub_orders() %>%
+    dplyr::mutate(foodclub = TRUE)
+  dplyr::bind_rows(orders, pre_orders) %>%
+    dplyr::arrange(account_id, order_date, user_id)
+}
