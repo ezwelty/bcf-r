@@ -23,7 +23,7 @@ source("passwords.R")
 ```{r orders, include=FALSE}
 pma_token <- pma_login(pma_user, pma_pass)
 tax_exempt_users <- c("saramolton16@gmail.com", "bonaishalom")
-orders <- get_orders(overwrite = TRUE, token = pma_token) %>%
+orders <- get_orders(overwrite = FALSE, token = pma_token) %>%
   dplyr::mutate(
     tax_exempt = user_id %in% tax_exempt_users,
     markup = sales - price_paid
