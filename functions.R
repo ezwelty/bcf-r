@@ -9,7 +9,7 @@ library(magrittr)
 # ---- Foodclub (website) ----
 
 #' Login to Foodclub
-#' 
+#'
 #' @param username (character) Valid username.
 #' @param password (character) Valid password.
 #' @return An authorization token.
@@ -29,7 +29,7 @@ foodclub_login <- function(username, password) {
 # ---- Foodclub (phpMyAdmin) ----
 
 #' Login to Foodclub phpMyAdmin
-#' 
+#'
 #' @param username (character) Valid username.
 #' @param password (character) Valid password.
 #' @return An authorization token.
@@ -48,9 +48,9 @@ pma_login <- function(username, password) {
 }
 
 #' Get table via Foodclub phpMyAdmin
-#' 
+#'
 #' May be slow for very large tables since the function works by scraping HTML.
-#' 
+#'
 #' @param table (character) Name of the target database table.
 #' @param db (character) Name of the target database (default: \code{"foodclub"}).
 #' @param token (character) Authentication token from \code{\link{pma_login}}.
@@ -83,7 +83,7 @@ pma_get_table <- function(table, db = "foodclub", token) {
 }
 
 #' Parse Hex to String
-#' 
+#'
 #' @examples
 #' parse_hex(c("4f7374617261", "7069636b6c6562726963"))
 parse_hex <- function(x) {
@@ -97,9 +97,9 @@ parse_hex <- function(x) {
 }
 
 #' Import CSV via Foodclub phpMyAdmin
-#' 
+#'
 #' NOTE: Expects a CSV file with column names in the first row which all correspond to Foodclub database schema fields.
-#' 
+#'
 #' @param import_file (character) Path of the csv file to import.
 #' @param table (character) Name of the target database table.
 #' @param db (character) Name of the target database (default: \code{"foodclub"}).
@@ -120,9 +120,9 @@ pma_import_csv <- function(import_file, table, db = "foodclub", csv_replace = TR
 }
 
 #' Write object to CSV for import via Foodclub phpMyAdmin
-#' 
+#'
 #' As expected by phpMyAdmin, \code{NA}s are written as NULL (without quotes) and row names are left out.
-#' 
+#'
 #' @param x (coercible to data.frame) Object to be written.
 #' @param file (character | \code{\link{connection}}) File to be written (default: "", output to the console).
 #' @param ... Arguments to \code{\link{write.csv}}.
@@ -164,15 +164,15 @@ get_foodclub_orders <- function(overwrite = FALSE, token) {
 #' Parse Foodclub orders
 #' account_id | order_date | user_id | price_paid | tax_paid | collected | sales | tax | food | tax_exempt
 parse_foodclub_orders <- function(orders) {
-  
+
   ## Check for accounting changes
   if (any(orders$refunds != 0)) {
     stop("Non-zero refund")
   }
-  
+
   ## Remove empty orders
   orders <- orders[orders$pretax != 0, ]
-  
+
   ## Reallocate Costco true-ups
   # Early Costco orders lacked receipts, so percent fees were applied to match the charges on the debit card. Reallocate these fees to the price and tax paid by members:
   true_up_orders <- list(
@@ -189,7 +189,7 @@ parse_foodclub_orders <- function(orders) {
   )
   for (x in true_up_orders) {
     ind <- with(orders, account_id == x$account_id & order_date >= x$begin & order_date <= x$end)
-    true_ups <- with(orders[ind, ], (overall_order - order_subtotal) /  order_subtotal)
+    true_ups <- with(orders[ind, ], (overall_order - order_subtotal) /  order_subtotal, 0)
     modified <- orders[ind, ] %>%
       dplyr::mutate(
         pretax = pretax * (1 + true_ups),
@@ -203,7 +203,7 @@ parse_foodclub_orders <- function(orders) {
     }
     orders[ind, ] <- modified
   }
-  
+
   ## Move custom fees to member fees
   # The first several months of orders used `custom_fees` for markups, rather than the standard `member_fees`. Reassign all custom fees as member fees:
   custom_fee_orders <- list(
@@ -224,7 +224,7 @@ parse_foodclub_orders <- function(orders) {
     stop("Non-zero custom fees")
   }
   orders$custom_fees <- NULL
-  
+
   ## Reassign misassigned orders
   # Foodclub accounts do not always map perfectly to BCF membership. Reassign misassigned orders to the correct account:
   misassigned_orders <- list(
@@ -240,7 +240,7 @@ parse_foodclub_orders <- function(orders) {
     ind <- with(orders, user_id == x$from & order_date >= x$begin & order_date <= x$end)
     orders$user_id[ind] <- x$to
   }
-  
+
   ## Split out total-only orders
   # The first few orders did not seperate price components. Reconstruct wholesale price, tax, and markup for these orders:
   total_only_orders <- list(
@@ -279,37 +279,45 @@ parse_foodclub_orders <- function(orders) {
     }
     orders[ind, ] <- modified
   }
-  
-  # Precomputations
+
+  ## Compute taxes paid and collected
   food_tax <- 0.0386
   nonfood_tax <- 0.08845
-  tax_rate_paid_variable <- orders$tax / orders$pretax
-  tax_rate_paid_fixed <- c(bcf_costco = 0.0346, bcf_costco_nf = 0.08445) %>%
-    extract(orders$account_id) %>%
-    replace(is.na(.), 0) %>%
-    replace(orders$order_date >= as.Date("2017-06-10"), 0) %>%
-    set_names(NULL)
-  food_fraction <- (tax_rate_paid_variable - nonfood_tax) / (food_tax - nonfood_tax)
-  
-  ## Match template
   orders %>%
     dplyr::mutate(
+      # price_paid: Pretax price paid to supplier (pretax)
       price_paid = pretax,
-      tax_paid = price_paid * ifelse(
-        account_id == "bcf_frontiernaturalfoods",
-        tax_rate_paid_variable, tax_rate_paid_fixed
-      ),
+      # tax_paid: Tax paid to supplier
+      tax_rate_paid = (tax / pretax) %>%
+        # Costco
+        # Before 2017-06-10: Tax paid on food (0.0346) and non-food (0.08445)
+        # Since 2017-06-10: No tax paid (reimbursed for orders through 2017-07-20)
+        replace(orders$account_id == "bcf_costco" & orders$order_date < as.Date("2017-06-10"), 0.0346) %>%
+        replace(orders$account_id == "bcf_costco" & orders$order_date >= as.Date("2017-06-10"), 0) %>%
+        replace(orders$account_id == "bcf_costco_nf" & orders$order_date < as.Date("2017-06-10"), 0.08445) %>%
+        replace(orders$account_id == "bcf_costco_nf" & orders$order_date >= as.Date("2017-06-10"), 0) %>%
+        # Frontier
+        # Before 2017-08-31: Tax paid combination of food (0.0386) and non-food (0.08845)
+        # Since 2017-08-31: No tax paid
+        replace(orders$account_id == "bcf_frontiernaturalfoods" & orders$order_date >= as.Date("2017-08-31"), 0) %>%
+        # All others: No tax paid
+        replace(!orders$account_id %in% c("bcf_costco", "bcf_costco_nf", "bcf_frontiernaturalfoods"), 0),
+      tax_paid = pretax * tax_rate_paid,
+      # collected: Total collected from user (overall_order)
+      collected = overall_order,
+      # food: Fraction of food in order
       food = ifelse(
         account_id == "bcf_frontiernaturalfoods",
-        food_fraction, ifelse(
-          account_id == "bcf_costco_nf",
-          0, 1
-        )
+        ((tax / pretax) - nonfood_tax) / (food_tax - nonfood_tax),
+        ifelse(account_id == "bcf_costco_nf", 0, 1)
       ),
-      collected = overall_order,
-      sales = collected / (1 + food * (food_tax - nonfood_tax) + nonfood_tax),
-      tax = collected - sales
+      tax_rate_owed = food * food_tax + (1 - food) * nonfood_tax,
+      # sales: Sales (price + markup) collected from user
+      sales = collected / (1 + tax_rate_owed),
+      # tax: Tax owed
+      tax = sales * tax_rate_owed
     ) %>%
+    dplyr::arrange(order_date, account_id, user_id) %>%
     dplyr::select(account_id, order_date, user_id, price_paid, tax_paid, collected, sales, tax, food)
 }
 
