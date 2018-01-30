@@ -58,7 +58,7 @@ pma_login <- function(username, password) {
 #' @examples
 #' token <- pma_login("username", "password")
 #' pma_get_table("private_bcf_goldenorganics", token = token)
-pma_get_table <- function(table, db = "foodclub", token) {
+pma_get_table <- function(table, db = "foodclub", token, hex = c("user_id")) {
   url <- "https://foodclub.org/phpmyadmin/import.php"
   query <- list(
     token = token,
@@ -76,8 +76,8 @@ pma_get_table <- function(table, db = "foodclub", token) {
     subset(select = -(1:4)) %>% # Remove non-data columns
     lapply(readr::parse_guess, na = c("", "NULL")) %>%
     as.data.frame(stringsAsFactors = FALSE)
-  if ("user_id" %in% names(df)) {
-    df$user_id %<>% parse_hex()
+  for (name in intersect(hex, names(df))) {
+    df[[name]] %<>% parse_hex()
   }
   df
 }
@@ -155,6 +155,16 @@ get_foodclub_orders <- function(overwrite = FALSE, token) {
   cache <- "orders.rds"
   if (overwrite || !file.exists(cache)) {
     pma_get_table("custom_view_dw_archived_invoice_user_totals_bouldercoopfood", token = token) %T>%
+      saveRDS(cache)
+  } else {
+    readRDS(cache)
+  }
+}
+
+get_foodclub_products <- function(overwrite = FALSE, token) {
+  cache <- "products.rds"
+  if (overwrite || !file.exists(cache)) {
+    pma_get_table("custom_view_archived_orders_bouldercoopfood", token = token, hex = c("user_id", "code")) %T>%
       saveRDS(cache)
   } else {
     readRDS(cache)

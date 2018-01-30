@@ -148,3 +148,163 @@ orders %>%
     geom_smooth(se = FALSE) +
     scale_y_continuous(limits = c(0, 1000), oob = function(x, lim) {return(x)})
 ```
+
+```{r products, include=FALSE}
+pma_token <- pma_login(pma_user, pma_pass)
+products <- get_foodclub_products(overwrite = FALSE, token = pma_token) %>%
+  dplyr::filter(account_id != "bcf_internal") %>%
+  dplyr::mutate(
+    size_unit = size %>%
+      strsplit(" ") %>%
+      sapply("[", 2),
+    size = size %>%
+      strsplit(" ") %>%
+      sapply("[", 1) %>%
+      as.numeric()
+  )
+
+# TODO: Seperate by account_id because some codes overlap (Equal Exchange, Frontier)
+# HACK: Exclude Frontier for now
+codes <- list(
+  # Oils
+  "Olive oil (organic)" = c("olol[0-9]+", "olive_oil"),
+  "Canola oil (organic)" = c("olca[0-9]+"),
+  "Sunflower oil (organic)" = c("olsu[0-9]+"),
+  "Coconut oil (organic)" = c("olcv[0-9]+|olco[0-9]+"),
+  "Balsamic vinegar" = c("balsamic_vinegar"),
+  "White vinegar" = c("white_vinegar"),
+  "Apple cider vinegar (organic)" = c("apple_vinegar"),
+  # Dairy & Alternatives
+  "Butter (organic)" = c("butter"),
+  "Butter" = c("butter_irish", "butter_unsalted"),
+  "Cheddar cheese" = c("cheddar", "xtrasharp_cheddar"),
+  "Goat cheese" = c("goat_cheese"),
+  "Coconut milk (organic)" = c("nv10cocm", "coconutmilk"),
+  # Eggs
+  "Eggs (organic)" = c("5eggs", "eggs"),
+  # Sweeteners
+  "Maple syrup (organic)" = c("mapl[0-9]+gal", "maple_syrup"),
+  "Agave syrup (organic)" = c("agac[0-9]+", "agdk[0-9]+", "agcldrum"),
+  "Honey (Colorado)" = c("hon[0-9]+", "hocl[0-9]+"),
+  "Cane sugar (organic)" = c("suga[0-9]+", "supo[0-9]+", "cane_sugar"),
+  "Chocolate chips (organic)" = c("18611", "18664", "18665", "choc[0-9]+", "chocl[0-9]+", "chocs[0-9]+"),
+  # Nuts
+  "Peanut butter (organic)" = c("pnbc[0-9]+", "peanut_butter"),
+  "Peanuts (organic)" = c("pntr[0-9]+", "pntb[0-9]+"),
+  "Cashews (organic)" = c("casw[0-9]+", "casp[0-9]+", "caswl[0-9]+", "61211", "61217", "61214"),
+  "Almonds" = c("almonds"),
+  "Almonds (organic)" = c("almn[0-9]+", "alms[0-9]+", "organic_almonds", "60203", "60204", "60206", "60202"),
+  "Walnuts (organic)" = c("waln[0-9]+", "walp[0-9]+"),
+  "Sunflower seeds (organic)" = c("sprs[0-9]+", "sund[0-9]+", "sund[0-9]+", "sunh[0-9]+"),
+  "Pumpkin seeds (organic)" = c("puAA[0-9\\.]+"),
+  "Flax seeds (organic)" = c("brof[0-9]+", "golf[0-9]+", "563"),
+  # Beans, Cereals, Rice
+  "Black beans (organic)" = c("blb[0-9]+"),
+  "Pinto beans (organic)" = c("pinb[0-9]+"),
+  "Garbanzo beans (organic)" = c("garm[0-9]+", "gars[0-9]+"),
+  "Red lentils (organic)" = c("rdld[0-9]+", "rdln[0-9]+"),
+  "Green lentils (organic)" = c("frgl[0-9]+", "grel[0-9]+"),
+  "White rice (organic)" = c("riwbn[0-9]+", "riar[0-9]+", "ribw[0-9]+", "risu[0-9]+", "riwj[0-9]+", "riwl[0-9]+", "masoori_rice"),
+  "Brown rice (organic)" = c("risg[0-9]+", "rilgn[0-9]+", "risgn[0-9]+", "ribb[0-9]+", "ribm[0-9]+", "rijb[0-9]+", "rilb[0-9]+", "risw[0-9]+", "brown_rice"),
+  "Polenta (organic)" = c("pole[0-9]+"),
+  "Corn kernels (organic)" = c("popc[0-9]+", "popm[0-9]+", "popw[0-9]+"),
+  "Rolled oats (organic)" = c("oati[0-9]+", "quik[0-9]+", "quro[0-9]+", "rego[0-9]+", "rero[0-9]+", "tcut[0-9]+", "thro[0-9]+"),
+  "Quinoa (organic)" = c("quin[0-9]+", "quir[0-9]+", "quit[0-9]+", "quib[0-9]+"),
+  # Flours
+  "White wheat flour (organic)" = c("apf[0-9]+", "uapf[0-9]+"),
+  "Whole wheat flour (organic)" = c("whlwf[0-9]+", "whwpfl[0-9]+"),
+  "Spelt flour (organic)" = c("spfl[0-9]+", "spwh[0-9]+"),
+  # Pasta, Tortilla
+  "Couscous (organic)" = c("cous[0-9]+", "cousw[0-9]+", "pearl_couscous"),
+  "Wheat pasta (organic)" = c("mixed_pasta"),
+  "Flour tortillas (organic)" = c("tortillas_raw_org"),
+  "Flour tortillas" = c("flour_tortillas_8", "flour_tortillas_10", "tortillas_raw_conv"),
+  "Corn tortilla chips (organic)" = c("tortilla_chips"),
+  # Fruit
+  "Frozen blueberries (organic)" = c("blueberries_froz"),
+  "Frozen strawberries (organic)" = c("strawberries_froz"),
+  "Frozen mangos (organic)" = c("mangoes_froz"),
+  "Dates (organic)" = c("dapt[0-9]+", "datm[0-9]+", "deglet_dates"),
+  "Dried apples (organic)" = c("apdi[0-9]+", "apri[0-9]+"),
+  "Dried apricots (organic)" = c("apr[0-9]+", "dried_apricots", "61255"),
+  "Dried grapes (organic)" = c("raif[0-9]+", "rais[0-9]+", "raist[0-9]+", "raisu[0-9]+", "raig[0-9]+", "raim[0-9]+"),
+  "Dried figs (organic)" = c("fibm[0-9]+", "fig[0-9]+", "figo[0-9]+", "dried_figs"),
+  "Dried mangos (organic)" = c("mang[0-9]+", "dried_mangoes_organic", "61253"),
+  "Lemon juice (organic)" = c("lemon_juice"),
+  # Vegetables
+  "Tomatoes, diced, canned (organic)" = c("nv10todi", "diced_tomatoes"),
+  "Tomatoes, paste, canned (organic)" = c("nv10topa", "tomato_paste"),
+  "Onions" = c("onion_yellow"),
+  "Garlic" = c("garlic", "peeled_garlic"),
+  # Miscellaneous
+  "Vanilla extract (organic)" = c("vanx[0-9]+", "23182", "23183", "23184"),
+  "Coffee (organic)" = c(
+    "coffee", "espresso_mantecca", "10001", 
+    products %>%
+      dplyr::filter(account_id == "bcf_consciouscoffee", grepl("organic", description, ignore.case = TRUE)) %$%
+      code,
+    products %>%
+      dplyr::filter(account_id == "bcf_equalexchange", grepl("Espresso|Roast", description, ignore.case = TRUE)) %$%
+      code
+  ),
+  # Spices
+  "Salt" = c("salrm[0-9]+", "sare[0-9]+", "saresh", "sarf[0-9]+"),
+  # House & Body
+  "Toilet paper (recycled)" = c("tp"),
+  "Paper towels (recycled)" = c("paper_towels"),
+  "Dish soap" = c("dish_soap"),
+  "Laundry detergent" = c("laundry_detergent", "tide_powder")
+) %>%
+  sapply(function(x) {paste0("^", x, "$", collapse = "|")})
+
+products$category <- NULL
+for (i in seq_along(codes)) {
+  index <- grepl(codes[[i]], products$code)
+  products$category[index] <- names(codes)[i] 
+}
+
+# By code
+products %>%
+  dplyr::group_by(account_id, code) %>%
+  dplyr::summarise(
+    description = description[1],
+    price = round(sum(qty * price))
+    # qty = sum(qty),
+    # size = sum(size),
+    # size_unit = size_unit[1]
+  ) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(
+    fraction = price / sum(price)
+  ) %>%
+  dplyr::arrange(-price) %>%
+  readr::write_delim("products-code.tsv", delim = "\t")
+
+# Not categorized
+products %>%
+  dplyr::filter(is.na(category)) %>%
+  dplyr::group_by(account_id, code) %>%
+  dplyr::summarise(
+    description = description[1],
+    price = round(sum(qty * price))
+    # qty = sum(qty),
+    # size = sum(size),
+    # size_unit = size_unit[1]
+  ) %>%
+  dplyr::arrange(-price)
+
+# By category
+products %>%
+  dplyr::group_by(category) %>%
+  dplyr::summarise(
+    price = round(sum(qty * price)),
+    account_ids = paste(sort(unique(account_id)), collapse = ", "),
+    codes = paste(sort(unique(code)), collapse = ", ")
+  ) %>%
+  dplyr::mutate(
+    fraction = price / sum(price)
+  ) %>%
+  dplyr::arrange(-price) %>%
+  dplyr::select(category, price, fraction, account_ids, codes) %>%
+  readr::write_delim("products-category.tsv", delim = "\t")
+```
