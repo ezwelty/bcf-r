@@ -6,15 +6,53 @@ library(magrittr)
   x[[name, exact = TRUE]]
 }
 
+# ---- Helpers -----
+
+#' Parse hex to string
+#'
+#' @param x (character) Hexadecimal strings
+#' @examples
+#' parse_hex(c("4f7374617261", "7069636b6c6562726963"))
+parse_hex <- function(x) {
+  sapply(x, function(s) {
+    seq(1, nchar(s), by = 2) %>%
+      sapply(function(x) substr(s, x, x + 1)) %>%
+      strtoi(base = 16L) %>%
+      as.raw() %>%
+      rawToChar()
+  }, USE.NAMES = FALSE)
+}
+
+#' Format object for SQL query
+#'
+#' Strings are wrapped in single quotes (\code{"'x'"}) and \code{NA}, \code{NULL} converted to \code{"NULL"}.
+#' @param x Object to format
+#' @examples
+#' format_sql(1)
+#' format_sql("foodclub")
+#' format_sql(NA)
+#' format_sql(NULL)
+format_sql <- function(x) {
+  if (is.character(x)) {
+    paste0("'", x, "'")
+  } else if (is.null(x) || is.na(x)) {
+    "NULL"
+  } else {
+    x
+  }
+}
+
 # ---- Foodclub (website) ----
 
 #' Login to Foodclub
 #'
-#' @param username (character) Valid username.
-#' @param password (character) Valid password.
-#' @return An authorization token.
+#' @param username (character) Username
+#' @param password (character) Password
+#' @return Authorization token
 #' @examples
+#' \dontrun{
 #' foodclub_login("username", "password")
+#' }
 foodclub_login <- function(username, password) {
   url <- "https://foodclub.org/bouldercoopfood/login"
   response <- httr::POST(url, body = list(user_id = username, password = password, login = "Login"))
@@ -30,11 +68,13 @@ foodclub_login <- function(username, password) {
 
 #' Login to Foodclub phpMyAdmin
 #'
-#' @param username (character) Valid username.
-#' @param password (character) Valid password.
-#' @return An authorization token.
+#' @param username (character) Username
+#' @param password (character) Password
+#' @return Authorization token
 #' @examples
+#' \dontrun{
 #' pma_login("username", "password")
+#' }
 pma_login <- function(username, password) {
   url <- "https://foodclub.org/phpmyadmin/index.php"
   body <- list(pma_username = username, pma_password = password)
@@ -47,18 +87,21 @@ pma_login <- function(username, password) {
   token
 }
 
-#' Get table via Foodclub phpMyAdmin
+#' Run SQL query via Foodclub phpMyAdmin
 #'
-#' May be slow for very large tables since the function works by scraping HTML.
-#'
-#' @param table (character) Name of the target database table.
-#' @param db (character) Name of the target database (default: \code{"foodclub"}).
-#' @param token (character) Authentication token from \code{\link{pma_login}}.
-#' @return The specified database table as a \link{\code{data.frame}}.
+#' @param sql (character) SQL query
+#' @param table (character) Database table (default: \code{NULL})
+#' @param db (character) Database (default: \code{"foodclub"})
+#' @param token (character) Authentication token (see \code{\link{pma_login}})
+#' @param result (boolean) Whether to return the query result (\code{TRUE}) or a boolean success flag (\code{FALSE})
+#' @param hex (character) Field names to parse from hex (see \code{\link{parse_hex}})
+#' @return Query result as a \code{\code{data.frame}} or boolean success flag (\code{result = FALSE})
 #' @examples
+#' \dontrun{
 #' token <- pma_login("username", "password")
-#' pma_get_table("private_bcf_goldenorganics", token = token)
-pma_get_table <- function(table, db = "foodclub", token, hex = c("user_id")) {
+#' pma_query("select * from private_bcf_goldenorganics", token = token, result = TRUE)
+#' }
+pma_query <- function(sql, table = NULL, db = "foodclub", token, result = FALSE, hex = c("user_id")) {
   url <- "https://foodclub.org/phpmyadmin/import.php"
   query <- list(
     token = token,
@@ -66,75 +109,98 @@ pma_get_table <- function(table, db = "foodclub", token, hex = c("user_id")) {
     db = db,
     pos = 0,
     goto = "tbl_sql.php",
-    sql_query = paste0("SELECT * FROM ", db, ".", table, " LIMIT 0, 999999;")
+    sql_query = sql,
+    show_query = 0
   )
-  df <- httr::POST(url, query = query) %>%
-    httr::content() %>%
-    xml2::xml_find_first(xpath = "//table[@id = 'table_results']") %>%
-    rvest::html_table() %>%
-    subset(.[[2]] != "") %>% # Remove header rows
-    subset(select = -(1:4)) %>% # Remove non-data columns
-    lapply(readr::parse_guess, na = c("", "NULL")) %>%
-    as.data.frame(stringsAsFactors = FALSE)
-  for (name in intersect(hex, names(df))) {
-    df[[name]] %<>% parse_hex()
+  xml <- httr::POST(url, query = query) %>%
+    httr::content()
+  success <- xml %>%
+    xml2::xml_find_first("//div[@class = 'success']")
+  if (length(success) > 0) {
+    if (result) {
+      df <- xml %>%
+        xml2::xml_find_first(xpath = "//table[@id = 'table_results']") %>%
+        rvest::html_table() %>%
+        subset(.[[2]] != "") %>% # Remove header rows
+        subset(select = -(1:4)) %>% # Remove non-data columns
+        lapply(readr::parse_guess, na = c("", "NULL")) %>%
+        as.data.frame(stringsAsFactors = FALSE)
+      for (name in intersect(hex, names(df))) {
+        df[[name]] %<>% parse_hex()
+      }
+      df
+    } else {
+      TRUE
+    }
+  } else {
+    FALSE
   }
-  df
 }
 
-#' Parse Hex to String
+#' Get table via Foodclub phpMyAdmin
 #'
+#' May be slow for very large tables since the function works by scraping HTML.
+#'
+#' @param table (character) Database table
+#' @param db (character) Database (default: \code{"foodclub"})
+#' @param token (character) Authentication token (see \code{\link{pma_login}})
+#' @param hex (character) Field names to parse from hex (see \code{\link{parse_hex}})
+#' @return Database table as a \code{\link{data.frame}}
 #' @examples
-#' parse_hex(c("4f7374617261", "7069636b6c6562726963"))
-parse_hex <- function(x) {
-  sapply(x, function(s) {
-    seq(1, nchar(s), by = 2) %>%
-      sapply(function(x) substr(s, x, x + 1)) %>%
-      strtoi(base = 16L) %>%
-      as.raw() %>%
-      rawToChar()
-  }, USE.NAMES = FALSE)
+#' \dontrun{
+#' token <- pma_login("username", "password")
+#' pma_get_table("private_bcf_goldenorganics", token = token)
+#' }
+pma_get_table <- function(table, db = "foodclub", token, hex = c("user_id")) {
+  sql <- paste0("SELECT * FROM ", db, ".", table, " LIMIT 0, 999999;")
+  pma_query(sql = sql, db = db, token = token, result = TRUE, hex = hex)
 }
 
 #' Import CSV via Foodclub phpMyAdmin
 #'
-#' NOTE: Expects a CSV file with column names in the first row which all correspond to Foodclub database schema fields.
+#' Expects a CSV file with column names in the first row which all correspond to Foodclub database schema fields.
 #'
-#' @param import_file (character) Path of the csv file to import.
-#' @param table (character) Name of the target database table.
-#' @param db (character) Name of the target database (default: \code{"foodclub"}).
-#' @param csv_replace (boolean) Whether to delete existing table rows before import (default: \code{TRUE}).
-#' @param csv_columns (character) Names of the table fields corresponding to each column of the csv file (default: \code{names(read.csv(import_file)}).
-#' @param skip_queries (numeric) Number of lines of the csv file to skip (default: \code{1}).
-#' @param token (character) Authentication token from \code{\link{pma_login}}.
+#' @param path (character) Path to CSV file
+#' @param table (character) Database table
+#' @param db (character) Database (default: \code{"foodclub"}).
+#' @param csv_replace (boolean) Whether to delete existing table rows before import (default: \code{TRUE})
+#' @param csv_columns (character) Table fields corresponding to each column of the csv file (default: \code{names(read.csv(import_file)})
+#' @param skip_queries (numeric) Number of lines to skip when reading \code{file} (default: \code{1})
+#' @param token (character) Authentication token (see \code{\link{pma_login}})
 #' @examples
+#' \dontrun{
 #' token <- pma_login("username", "password")
-#' pma_import_csv("file.csv", "table", token = token)
-pma_import_csv <- function(import_file, table, db = "foodclub", csv_replace = TRUE, csv_columns = names(read.csv(import_file)), skip_queries = 1, token) {
+#' pma_import_csv(file.csv, "table", token = token)
+#' }
+pma_import_csv <- function(path, table, db = "foodclub", csv_replace = TRUE, csv_columns = names(read.csv(path)), skip_queries = 1, token) {
   csv_columns <- paste(csv_columns, collapse = ",")
   url <- "https://foodclub.org/phpmyadmin/import.php"
-  response <- httr::POST(url, body = c(mget(c("token", "table", "db", "csv_replace", "csv_columns", "skip_queries")), list(import_type = "table", format = "csv", charset_of_file = "utf-8", csv_terminated = ",", csv_enclosed = "\"", csv_escaped = "\"", csv_new_line = "auto", import_file = httr::upload_file(import_file))))
+  body = c(
+    mget(c("token", "table", "db", "csv_replace", "csv_columns", "skip_queries")),
+    list(
+      import_type = "table", format = "csv", charset_of_file = "utf-8",
+      csv_terminated = ",", csv_enclosed = "\"", csv_escaped = "\"", csv_new_line = "auto",
+      import_file = httr::upload_file(path))
+  )
+  response <- httr::POST(url, body = body)
   # Print query result
-  xml <- httr::content(response)
-  cat(xml2::xml_text(xml2::xml_find_first(xml, "//div[@id='result_query']")))
+  httr::content(response) %>%
+    xml2::xml_find_first("//div[@id='result_query']") %>%
+    xml2::xml_text() %>%
+    cat()
 }
 
 #' Write object to CSV for import via Foodclub phpMyAdmin
 #'
-#' As expected by phpMyAdmin, \code{NA}s are written as NULL (without quotes) and row names are left out.
+#' As expected by phpMyAdmin, \code{NA} is written as NULL (without quotes) and row names are left out.
 #'
-#' @param x (coercible to data.frame) Object to be written.
-#' @param file (character | \code{\link{connection}}) File to be written (default: "", output to the console).
-#' @param ... Arguments to \code{\link{write.csv}}.
+#' @param x (coercible to data.frame) Object to write
+#' @param path (character) Path to write to (default: \code{""}, output to console)
 #' @examples
-#' x <- data.frame(code = c("a", "b"), price = c(10, NULL))
-#' pma_write_import_csv(x, "x.csv")
-pma_write_import_csv <- function(x, file = "", ...) {
-  write.csv(x, file = file, na = "NULL", row.names = FALSE, ...)
-  # Remove quotes from NULL
-  old_lines <- readLines(file)
-  new_lines <- gsub("\"NULL\"", "NULL", old_lines)
-  cat(new_lines, file = file, sep = "\n")
+#' x <- data.frame(code = c("a", "b"), price = c(10, NA))
+#' pma_write_import_csv(x)
+pma_write_import_csv <- function(x, path = "") {
+  write.csv(x, file = path, na = "NULL", row.names = FALSE)
 }
 
 # ---- Finances ----
