@@ -121,7 +121,7 @@ pma_query <- function(sql, table = NULL, db = "foodclub", token, result = FALSE,
       df <- xml %>%
         xml2::xml_find_first(xpath = "//table[@id = 'table_results']") %>%
         rvest::html_table() %>%
-        subset(.[[2]] != "") %>% # Remove header rows
+        subset(.[[2]] == "Edit") %>% # Remove header rows
         subset(select = -(1:4)) %>% # Remove non-data columns
         lapply(readr::parse_guess, na = c("", "NULL")) %>%
         as.data.frame(stringsAsFactors = FALSE)
