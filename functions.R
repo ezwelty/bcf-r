@@ -355,11 +355,47 @@ parse_foodclub_orders <- function(orders) {
     }
     orders[ind, ] <- modified
   }
+  
+  ## Move olive oil in mixed bcf_internal order to bcf_other (2018-04-16)
+  mixed_orders <- list(
+    list(
+      user_id = "ingram",
+      shares = 50
+    ),
+    list(
+      user_id = "oragoldman",
+      shares = 25
+    )
+  )
+  ind <- with(orders, order_date == as.Date("2018-04-16") & account_id == "bcf_internal")
+  temp <- orders[ind, ]
+  temp$account_id <- "bcf_other"
+  markup <- 0.10 # special case
+  for (x in mixed_orders) {
+    # Set bcf_internal to only member shares
+    i <- with(orders, ind & user_id == x$user_id)
+    orders[i, c("pretax", "invoice", "order_subtotal")] <- x$shares / (1 + markup)
+    orders[i, c("member_fees")] <- x$shares * (markup / (1 + markup))
+    orders[i, c("overall_order")] <- x$shares
+    orders[i, c("tax")] <- 0
+    # Set bcf_other to only olive oil
+    j <- with(temp, user_id == x$user_id)
+    temp[j, c("pretax", "tax", "invoice", "order_subtotal", "member_fees", "overall_order")] %<>%
+      subtract(orders[i, c("pretax", "tax", "invoice", "order_subtotal", "member_fees", "overall_order")])
+  }
+  orders <- rbind(
+      orders[!ind, ],
+      orders[ind & orders$user_id %in% sapply(mixed_orders, "[[", "user_id"), ],
+      temp)
 
+  ## Move olive oil in unmixed bcf_internal order to bcf_other (2018-05-07)
+  ind <- with(orders, order_date == as.Date("2018-05-07") & account_id == "bcf_internal")
+  orders$account_id[ind] <- "bcf_other"
+  
   ## Compute taxes paid and collected
   food_tax <- 0.0386
   nonfood_tax <- 0.08845
-  orders %>%
+  orders %<>%
     dplyr::mutate(
       # price_paid: Pretax price paid to supplier (pretax)
       price_paid = pretax,
@@ -385,7 +421,7 @@ parse_foodclub_orders <- function(orders) {
       food = ifelse(
         account_id == "bcf_frontiernaturalfoods",
         ((tax / pretax) - nonfood_tax) / (food_tax - nonfood_tax),
-        ifelse(account_id == "bcf_costco_nf", 0, 1)
+        ifelse(account_id %in% c("bcf_costco_nf", "bcf_internal"), 0, 1)
       ),
       tax_rate_owed = food * food_tax + (1 - food) * nonfood_tax,
       # sales: Sales (price + markup) collected from user
@@ -395,6 +431,24 @@ parse_foodclub_orders <- function(orders) {
     ) %>%
     dplyr::arrange(order_date, account_id, user_id) %>%
     dplyr::select(account_id, order_date, user_id, price_paid, tax_paid, collected, sales, tax, food)
+
+  ## Set all but collected to zero for member shares
+  ind <- orders$account_id == "bcf_internal"
+  orders[ind, c("price_paid", "tax_paid", "sales", "tax", "food")] <- 0
+  
+  ## Adjust pretax value of olive oil sold from inventory
+  inventory_orders <- list(
+    list(
+      order_date = as.Date("2018-05-07"),
+      markup = 26.85 / 25
+    )
+  )
+  for (x in inventory_orders) {
+    ind <- with(orders, account_id == "bcf_other" & order_date == x$order_date)
+    orders$price_paid[ind] %<>% divide_by(x$markup)
+  }
+  
+  orders
 }
 
 #' Get Pre-Foodclub orders
