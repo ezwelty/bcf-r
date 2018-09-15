@@ -356,6 +356,18 @@ parse_foodclub_orders <- function(orders) {
     orders[ind, ] <- modified
   }
 
+  ## Correct Chrysalis markup fiasco
+  # Remove spurious Costco (non-food) order
+  orders %<>%
+    dplyr::filter(order_date != as.Date("2018-09-14"))
+  # Fix Chrysalis member_fees (15% -> 10%) on 2018-08-30 Golden Organics and 2018-09-04 Costco
+  ind <- which(with(orders, user_id == "Chrysalis" & order_date == as.Date("2018-08-30") & account_id == "bcf_goldenorganics"))
+  orders$member_fees[ind] <- orders$order_subtotal[ind] * 0.10
+  orders$overall_order[ind] <- orders$member_fees[ind] + orders$order_subtotal[ind]
+  ind <- which(with(orders, user_id == "Chrysalis" & order_date == as.Date("2018-09-04") & account_id == "bcf_costco"))
+  orders$member_fees[ind] <- orders$order_subtotal[ind] * 0.10
+  orders$overall_order[ind] <- orders$member_fees[ind] + orders$order_subtotal[ind]
+
   ## Compute taxes paid and collected
   food_tax <- 0.0386
   nonfood_tax <- 0.08845
