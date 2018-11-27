@@ -94,14 +94,13 @@ pma_login <- function(username, password) {
 #' @param db (character) Database (default: \code{"foodclub"})
 #' @param token (character) Authentication token (see \code{\link{pma_login}})
 #' @param result (boolean) Whether to return the query result (\code{TRUE}) or a boolean success flag (\code{FALSE})
-#' @param hex (character) Field names to parse from hex (see \code{\link{parse_hex}})
 #' @return Query result as a \code{\code{data.frame}} or boolean success flag (\code{result = FALSE})
 #' @examples
 #' \dontrun{
 #' token <- pma_login("username", "password")
 #' pma_query("select * from private_bcf_goldenorganics", token = token, result = TRUE)
 #' }
-pma_query <- function(sql, table = NULL, db = "foodclub", token, result = FALSE, hex = c("user_id")) {
+pma_query <- function(sql, table = NULL, db = "foodclub", token, result = FALSE) {
   url <- "https://foodclub.org/phpmyadmin/import.php"
   query <- list(
     token = token,
@@ -118,17 +117,9 @@ pma_query <- function(sql, table = NULL, db = "foodclub", token, result = FALSE,
     xml2::xml_find_first("//div[@class = 'success']")
   if (length(success) > 0) {
     if (result) {
-      df <- xml %>%
+      xml %>%
         xml2::xml_find_first(xpath = "//table[@id = 'table_results']") %>%
-        rvest::html_table() %>%
-        subset(.[[2]] == "Edit") %>% # Remove header rows
-        subset(select = -(1:4)) %>% # Remove non-data columns
-        lapply(readr::parse_guess, na = c("", "NULL")) %>%
-        as.data.frame(stringsAsFactors = FALSE)
-      for (name in intersect(hex, names(df))) {
-        df[[name]] %<>% parse_hex()
-      }
-      df
+        rvest::html_table(header = TRUE, fill = TRUE, trim = TRUE)
     } else {
       TRUE
     }
@@ -145,16 +136,62 @@ pma_query <- function(sql, table = NULL, db = "foodclub", token, result = FALSE,
 #' @param db (character) Database (default: \code{"foodclub"})
 #' @param token (character) Authentication token (see \code{\link{pma_login}})
 #' @param hex (character) Field names to parse from hex (see \code{\link{parse_hex}})
+#' @param block (integer) Number of rows to process at a time
 #' @return Database table as a \code{\link{data.frame}}
 #' @examples
 #' \dontrun{
 #' token <- pma_login("username", "password")
 #' pma_get_table("private_bcf_goldenorganics", token = token)
 #' }
-pma_get_table <- function(table, db = "foodclub", token, hex = c("user_id")) {
-  sql <- paste0("SELECT * FROM ", db, ".", table, " LIMIT 0, 999999;")
-  pma_query(sql = sql, db = db, token = token, result = TRUE, hex = hex)
+pma_get_table <- function(table, db = "foodclub", token, hex = c("user_id"), block = 1000) {
+  # Count table rows
+  sql <- paste0("SELECT COUNT(*) as rows FROM ", db, ".", table, ";")
+  rows <- pma_query(sql = sql, db = db, token = token, result = TRUE)$rows
+  # Read table in blocks
+  starts <- seq(0, rows - 1, block)
+  success <- TRUE
+  dfs <- starts %>%
+    lapply(function(i) {
+      sql <- paste0("SELECT * FROM ", db, ".", table, " LIMIT ", i, ", ", block, ";")
+      df <- pma_query(sql = sql, db = db, token = token, result = TRUE) %>%
+        data.frame(fix.empty.names = TRUE)
+      if (is.logical(df) && !df) {
+        success <- FALSE
+        break
+      } else {
+        df
+      }
+    })
+  if (success) {
+    df <- dfs %>%
+      dplyr::bind_rows() %>%
+      dplyr::filter(Var.2 == "Edit") %>% # Remove header rows
+      dplyr::select(-dplyr::starts_with('Var.')) %>% # Remove non-data columns
+      dplyr::mutate_at(.funs = parse_hex, .vars = intersect(hex, names(.)))
+  } else {
+    FALSE
+  }
 }
+
+# Export cannot be accessed via URL
+# pma_export_csv <- function(table, db = 'foodclub', token) {
+#   url <- 'https://foodclub.org/phpmyadmin/export.php'
+#   body <- list(
+#     db = db, table = table, token = token,
+#     single_table = TRUE, export_type = 'table', export_method = 'quick', quick_or_custom = 'custom',
+#     allrows = 1, output_format = 'astext', filename_template = '@TABLE@', charset_of_file = 'utf-8',
+#     compression = 'none', what = 'csv',
+#     csv_null = '', csv_columns = 'something')
+#   response <- httr::POST(url, httr::write_disk('temp.csv', overwrite = TRUE), body = body)
+#   textarea <- xml %>%
+#     xml2::xml_find_first(xpath = "//textarea[@name = 'sqldump']")
+#   if (length(textarea) > 0) {
+#     textarea %>%
+#       xml2::xml_text()
+#   } else {
+#     return(FALSE)
+#   }
+# }
 
 #' Import CSV via Foodclub phpMyAdmin
 #'
@@ -231,6 +268,16 @@ get_foodclub_products <- function(overwrite = FALSE, token) {
   cache <- "products.rds"
   if (overwrite || !file.exists(cache)) {
     pma_get_table("custom_view_archived_orders_bouldercoopfood", token = token, hex = c("user_id", "code")) %T>%
+      saveRDS(cache)
+  } else {
+    readRDS(cache)
+  }
+}
+
+get_foodclub_invoices <- function(overwrite = FALSE, token) {
+  cache <- "invoices.rds"
+  if (overwrite || !file.exists(cache)) {
+    pma_get_table("custom_view_archived_invoice_entry_data_bouldercoopfood", token = token, hex = c("key")) %T>%
       saveRDS(cache)
   } else {
     readRDS(cache)
