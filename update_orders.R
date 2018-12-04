@@ -15,10 +15,12 @@ orders <- get_orders(overwrite = TRUE, token = token) %>%
   )
 
 # Save new rows to file
+year <- 2018
+month <- 11
 orders %>%
   dplyr::select(foodclub, order_date, account_id, user_id, price_paid, tax_paid, collected, sales, tax, food, tax_exempt) %>%
   dplyr::arrange(order_date, account_id, user_id) %>%
-  dplyr::filter(order_date > as.Date("2018-09-16")) %>%
+  dplyr::filter(lubridate::year(order_date) == year, lubridate::month(order_date) == month) %>%
   write.table("new_orders.tsv", quote = FALSE, na = "", sep = "\t", row.names = FALSE, col.names = FALSE)
 
 # Copy-paste new_orders.tsv into https://docs.google.com/spreadsheets/d/1UCTvRndnzphGTGPRsSX9Y6FuuZhMIMlF7XRTb1jGzk4/edit#gid=1616631951
