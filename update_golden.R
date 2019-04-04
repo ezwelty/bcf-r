@@ -58,7 +58,9 @@ parse_origins <- function(origins) {
     Philippine = "Philippines",
     Philipines = "Philippines",
     Spaon = "Spain",
-    ua = "USA"
+    ua = "USA",
+    Netherland = "Netherlands",
+    Thailnd = "Thailand"
   )
   replace <- origins %in% names(replacements)
   origins[replace] %<>%
@@ -72,7 +74,11 @@ parse_origins <- function(origins) {
 #' parse_categories(c("SPICE", "BAKING"))
 parse_categories <- function(categories) {
   categories %>%
-    stringr::str_to_title()
+    stringr::str_to_title() %>%
+    replace(. == 'Non Food', 'Non-Food') %>%
+    replace(. == 'Sweetners', 'Sweeteners') %>%
+    replace(. == 'Spice', 'Spices') %>%
+    replace(. == 'Grain', 'Grains')
 }
 
 #' Read Golden Organics pricelist
@@ -83,7 +89,7 @@ parse_categories <- function(categories) {
 #' }
 read_pricelist <- function(path) {
   df <- path %>%
-    readxl::read_excel(skip = 11) %>%
+    readxl::read_excel(skip = 10) %>%
     dplyr::mutate(
       category = NA
     )
@@ -100,11 +106,11 @@ read_pricelist <- function(path) {
     dplyr::rename(
       code = `Item ID`,
       description = `Item Description`,
-      origin = ORIGIN,
-      size = `Size/lbs`,
-      price = Pricing
+      origin = Location,
+      size = `Stocking U/M`,
+      price = Commercial
     ) %>%
-    dplyr::select(-`Price/lb    `)
+    dplyr::select(-`Price/lb`)
   sizes <- df$size %>%
     parse_sizes()
   df %<>%
@@ -116,7 +122,7 @@ read_pricelist <- function(path) {
       origin = parse_origins(origin),
       category = parse_categories(category)
     ) %>%
-    dplyr::filter(gsub("[- ]", "", tolower(category)) != "nonfood")
+    dplyr::filter(gsub("[- ]", "", tolower(category)) != "non food")
   duplicates <- duplicated(df$code)
   if (any(duplicates)) {
     all_duplicates <- duplicates | duplicated(df$code, fromLast = TRUE)
@@ -153,20 +159,19 @@ build_sql <- function(old, new, token) {
       }
     } else {
       # In stock
-      if (new$price[j] != old$price[i]) {
+      if (!new$price[j] %in% as.numeric(old$price[i])) {
         updates["price"] <- new$price[j]
       }
-      if (new$size[j] != old$size[i]) {
+      if (!new$size[j] %in% old$size[i]) {
         updates["size"] <- new$size[j]
       }
-      if (new$description[j] != old$description[i]) {
+      if (!new$description[j] %in% old$description[i]) {
         updates["description"] <- new$description[j]
       }
-      if (new$category[j] != old$category[i]) {
+      if (!new$category[j] %in% old$category[i]) {
         updates["category"] <- new$category[j]
       }
-      na_origins <- sum(is.na(new$origin[j]), is.na(old$origin[i]))
-      if (na_origins == 1 || (na_origins == 0 & new$origin[j] != old$origin[i])) {
+      if (!new$origin[j] %in% old$origin[i]) {
         updates["origin"] <- new$origin[j]
       }
       if (!is.na(old$num_available[i])) {
@@ -221,8 +226,9 @@ build_sql <- function(old, new, token) {
 # ---- Update pricelist ----
 
 token <- pma_login(pma_user, pma_pass)
-old <- pma_get_table("private_bcf_goldenorganics", token = token)
-new <- read_pricelist("golden_pricelist.xlsx")
+old <- pma_get_table("private_bcf_goldenorganics", token = token) %>%
+  dplyr::mutate_all(.funs = function(x) {x %>% replace(. == "NULL", NA)})
+new <- read_pricelist("~/desktop/golden_pricelist.xlsx")
 sql <- build_sql(old, new, token = token) %>%
   unlist()
 sql %>%
