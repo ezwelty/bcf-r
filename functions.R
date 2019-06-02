@@ -119,7 +119,9 @@ pma_query <- function(sql, table = NULL, db = "foodclub", token, result = FALSE)
     if (result) {
       xml %>%
         xml2::xml_find_first(xpath = "//table[@id = 'table_results']") %>%
-        rvest::html_table(header = TRUE, fill = TRUE, trim = TRUE)
+        rvest::html_table(header = TRUE, fill = TRUE, trim = TRUE) %>%
+        dplyr::as_tibble(.name_repair = "unique") %>%
+        dplyr::mutate_all(.funs = as.character)
     } else {
       TRUE
     }
@@ -146,27 +148,27 @@ pma_query <- function(sql, table = NULL, db = "foodclub", token, result = FALSE)
 pma_get_table <- function(table, db = "foodclub", token, hex = c("user_id"), block = 1000) {
   # Count table rows
   sql <- paste0("SELECT COUNT(*) as rows FROM ", db, ".", table, ";")
-  rows <- pma_query(sql = sql, db = db, token = token, result = TRUE)$rows
+  rows <- pma_query(sql = sql, db = db, token = token, result = TRUE)$rows %>%
+    as.numeric()
   # Read table in blocks
   starts <- seq(0, rows - 1, block)
   success <- TRUE
   dfs <- starts %>%
     lapply(function(i) {
       sql <- paste0("SELECT * FROM ", db, ".", table, " LIMIT ", i, ", ", block, ";")
-      df <- pma_query(sql = sql, db = db, token = token, result = TRUE) %>%
-        data.frame(fix.empty.names = TRUE)
+      df <- pma_query(sql = sql, db = db, token = token, result = TRUE)
       if (is.logical(df) && !df) {
         success <- FALSE
         break
       } else {
-        df
+        df %>%
+          extract(.[[2]] != "", !grepl("^\\.\\.", names(.)))
       }
     })
   if (success) {
     df <- dfs %>%
       dplyr::bind_rows() %>%
-      dplyr::filter(Var.2 == "Edit") %>% # Remove header rows
-      dplyr::select(-dplyr::starts_with('Var.')) %>% # Remove non-data columns
+      dplyr::mutate_all(.funs = readr::parse_guess) %>%
       dplyr::mutate_at(.funs = parse_hex, .vars = intersect(hex, names(.)))
   } else {
     FALSE
@@ -258,7 +260,6 @@ get_foodclub_orders <- function(overwrite = FALSE, token) {
   cache <- "orders.rds"
   if (overwrite || !file.exists(cache)) {
     pma_get_table("custom_view_dw_archived_invoice_user_totals_bouldercoopfood", token = token) %>%
-      dplyr::mutate_all(.funs = readr::parse_guess) %T>%
       saveRDS(cache)
   } else {
     readRDS(cache)
