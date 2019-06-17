@@ -78,7 +78,7 @@ parse_categories <- function(categories) {
     replace(. == 'Non Food', 'Non-Food') %>%
     replace(. == 'Sweetners', 'Sweeteners') %>%
     replace(. == 'Spice', 'Spices') %>%
-    replace(. == 'Grain', 'Grains')
+    replace(. == 'Grains', 'Grain')
 }
 
 #' Read Golden Organics pricelist
@@ -88,8 +88,14 @@ parse_categories <- function(categories) {
 #' read_pricelist("Commercial Pricelist March 2018.xlsx")
 #' }
 read_pricelist <- function(path) {
-  df <- path %>%
-    readxl::read_excel(skip = 10) %>%
+  if (grepl('\\.csv$', path)) {
+    df <- path %>%
+      readr::read_csv(skip = 10)
+  } else {
+    df <- path %>%
+      readxl::read_excel(skip = 10)
+  }
+  df %<>%
     dplyr::mutate(
       category = NA
     )
@@ -227,8 +233,9 @@ build_sql <- function(old, new, token) {
 
 token <- pma_login(pma_user, pma_pass)
 old <- pma_get_table("private_bcf_goldenorganics", token = token) %>%
-  dplyr::mutate_all(.funs = function(x) {x %>% replace(. == "NULL", NA)})
-new <- read_pricelist("~/desktop/golden_pricelist.xlsx")
+  dplyr::mutate_if(is.character, .funs = function(x) {x %>% replace(. == "NULL", NA)})
+new <- read_pricelist("~/downloads/golden_pricelist.csv") %>%
+  dplyr::select_if(.predicate = function(x) {!all(is.na(x))})
 sql <- build_sql(old, new, token = token) %>%
   unlist()
 sql %>%

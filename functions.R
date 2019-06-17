@@ -166,7 +166,7 @@ pma_get_table <- function(table, db = "foodclub", token, hex = c("user_id"), blo
       }
     })
   if (success) {
-    df <- dfs %>%
+    dfs %>%
       dplyr::bind_rows() %>%
       dplyr::mutate_all(.funs = readr::parse_guess) %>%
       dplyr::mutate_at(.funs = parse_hex, .vars = intersect(hex, names(.)))
