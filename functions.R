@@ -259,8 +259,8 @@ get_foodclub_users <- function(overwrite = FALSE, token) {
 get_foodclub_orders <- function(overwrite = FALSE, token) {
   cache <- "orders.rds"
   if (overwrite || !file.exists(cache)) {
-    pma_get_table("custom_view_dw_archived_invoice_user_totals_bouldercoopfood", token = token) %>%
-      saveRDS(cache)
+    pma_get_table("custom_view_dw_archived_invoice_user_totals_bouldercoopfood", token = token) %T>%
+      saveRDS(file = cache)
   } else {
     readRDS(cache)
   }
