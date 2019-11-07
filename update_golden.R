@@ -90,10 +90,10 @@ parse_categories <- function(categories) {
 read_pricelist <- function(path) {
   if (grepl('\\.csv$', path)) {
     df <- path %>%
-      readr::read_csv(skip = 10)
+      readr::read_csv(skip = 7)
   } else {
     df <- path %>%
-      readxl::read_excel(skip = 10)
+      readxl::read_excel(skip = 7)
   }
   df %<>%
     dplyr::mutate(
@@ -114,7 +114,7 @@ read_pricelist <- function(path) {
       description = `Item Description`,
       origin = Location,
       size = `Stocking U/M`,
-      price = Commercial
+      price = Price
     ) %>%
     dplyr::select(-`Price/lb`)
   sizes <- df$size %>%
@@ -234,7 +234,7 @@ build_sql <- function(old, new, token) {
 token <- pma_login(pma_user, pma_pass)
 old <- pma_get_table("private_bcf_goldenorganics", token = token) %>%
   dplyr::mutate_if(is.character, .funs = function(x) {x %>% replace(. == "NULL", NA)})
-new <- read_pricelist("~/downloads/golden_pricelist.csv") %>%
+new <- read_pricelist("~/downloads/pricelist.xlsx") %>%
   dplyr::select_if(.predicate = function(x) {!all(is.na(x))})
 sql <- build_sql(old, new, token = token) %>%
   unlist()
