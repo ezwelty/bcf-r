@@ -114,9 +114,9 @@ read_pricelist <- function(path) {
       description = `Item Description`,
       origin = Location,
       size = `Stocking U/M`,
-      price = Price
+      price = Commercial
     ) %>%
-    dplyr::select(-`Price/lb`)
+    dplyr::select(category, code, description, origin, size, price)
   sizes <- df$size %>%
     parse_sizes()
   df %<>%
