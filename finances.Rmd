@@ -10,38 +10,41 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-library(ggplot2)
-library(magrittr)
-library(dplyr)
-knitr::opts_chunk$set(fig.width = 12, fig.align = "center", out.width = "100%", echo = FALSE, warning = FALSE, message = FALSE)
-options(knitr.table.format = "html", knitr.kable.NA = "0") 
-ggplot2::theme_set(ggplot2::theme_minimal(base_size = 14))
 source("functions.R")
 source("passwords.R")
+knitr::opts_chunk$set(
+  fig.width = 12, fig.align = "center", out.width = "100%", echo = FALSE,
+  warning = FALSE, message = FALSE)
+options(knitr.table.format = "html", knitr.kable.NA = "0") 
+ggplot2::theme_set(ggplot2::theme_minimal(base_size = 14))
 ```
 
-```{r orders, include=FALSE}
-pma_token <- pma_login(pma_user, pma_pass)
-tax_exempt_users <- c("saramolton16@gmail.com", "bonaishalom")
-orders <- get_orders(overwrite = TRUE, token = pma_token) %>%
-  dplyr::mutate(
-    tax_exempt = user_id %in% tax_exempt_users,
-    markup = sales - price_paid
+## Orders
+
+```{r load orders, include=FALSE}
+token <- pma_login(pma_user, pma_pass)
+orders <- pma_get_table_cache(
+    table = 'custom_view_dw_archived_invoice_user_totals_bouldercoopfood',
+    path = file.path('cache', 'orders.rds'),
+    token = token
   ) %>%
-  dplyr::filter(
-    account_id != "bcf_internal"
-  )
-# Print new rows
-orders %>%
-  select(foodclub, order_date, account_id, user_id, price_paid, tax_paid, collected, sales, tax, food, tax_exempt) %>%
-  arrange(order_date, account_id, user_id) %>%
-  filter(order_date >= as.Date("2017-02-08")) %>%
-  write.table("new_orders.tsv", quote = FALSE, na = "", sep = "\t", row.names = FALSE, col.names = FALSE)
+  # Fix errors in data
+  clean_foodclub_orders() %>%
+  # Format data
+  format_foodclub_orders() %>%
+  # Remove member shares
+  dplyr::filter(account_id != 'bcf_internal') %>%
+  # Add foodclub = TRUE column
+  tibble::add_column(foodclub = TRUE, .before = 1) %>%
+  # Sort by date, then supplier, then user
+  dplyr::arrange(order_date, account_id, user_id) %>%
+  # Add markup
+  dplyr::mutate(markup = collected - (price_paid + tax_paid + tax))
 ```
 
 ### Order date range
 
-```{r}
+```{r print date range}
 orders$order_date %>%
   range() %>%
   paste(collapse = " to ") %>%
@@ -50,119 +53,106 @@ orders$order_date %>%
 
 ### Average monthly order (by user)
 
-```{r}
+```{r table: average monthly order by user}
 orders %>%
-  group_by(user_id) %>%
-  summarize(
+  dplyr::group_by(user_id) %>%
+  dplyr::summarize(
     price = sum(price_paid),
     tax = sum(tax),
     markup = sum(markup),
     total = sum(collected),
     months = 0.51 + as.numeric(diff(range(order_date)), units = "days") / 30.44
   ) %>%
-  mutate_at(vars(-months, -user_id), funs(divide_by(., months))) %>%
-  mutate_if(is.numeric, round) %>%
-  arrange(-total) %>%
+  dplyr::mutate_at(vars(-months, -user_id), funs(divide_by(., months))) %>%
+  dplyr::mutate_if(is.numeric, round) %>%
+  dplyr::arrange(-total) %>%
   knitr::kable(digits = 0, format.args = list(big.mark = ",")) %>%
   kableExtra::kable_styling(bootstrap_options = "striped", full_width = FALSE)
 ```
 
 ### Order size (by supplier)
 
-```{r}
+```{r figure: order size by supplier}
 orders %>%
-  group_by(account_id, order_date) %>%
-  summarize_if(is.numeric, sum) %>%
-  ungroup() %>%
-  mutate(
+  dplyr::group_by(account_id, order_date) %>%
+  dplyr::summarize_if(is.numeric, sum) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(
     account_id = gsub("bcf_", "", account_id),
     account_id = reorder(account_id, -price_paid, FUN = median)
   ) %>%
-  ggplot(aes(account_id, price_paid)) +
-    geom_boxplot() +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  ggplot2::ggplot(ggplot2::aes(account_id, price_paid)) +
+   ggplot2:: geom_boxplot() +
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
 ```
 
 ### Order size (by user)
 
-```{r}
+```{r figure: order size by user}
 orders %>%
-  group_by(user_id, order_date) %>%
-  summarize_if(is.numeric, sum) %>%
-  ungroup() %>%
-  mutate(
+  dplyr::group_by(user_id, order_date) %>%
+  dplyr::summarize_if(is.numeric, sum) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(
     user_id = reorder(user_id, -price_paid, FUN = median)
   ) %>%
-  ggplot(aes(user_id, price_paid)) +
-    geom_boxplot() + 
-    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  ggplot2::ggplot(ggplot2::aes(user_id, price_paid)) +
+    ggplot2::geom_boxplot() + 
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
 ```
-
-<!-- ### Order size (through time) -->
-
-<!-- ```{r, echo=FALSE} -->
-<!-- orders %>% -->
-<!--   group_by(account_id, order_date) %>% -->
-<!--   summarize_if(is.numeric, sum) %>% -->
-<!--   ggplot(aes(order_date, collected, color = account_id)) + -->
-<!--     geom_line() -->
-<!-- ``` -->
 
 ### Monthy order (by supplier)
 
-```{r}
+```{r figure: monthly order by supplier}
 totals <- orders %>%
-    mutate(month = as.Date(format(order_date, "%Y-%m-01"))) %>%
-    group_by(month) %>%
-    summarize_if(is.numeric, sum) %>%
-    mutate(account_id = "Total")
+    dplyr::mutate(month = as.Date(format(order_date, "%Y-%m-01"))) %>%
+    dplyr::group_by(month) %>%
+    dplyr::summarize_if(is.numeric, sum) %>%
+    dplyr::mutate(account_id = "Total")
 orders %>%
-  mutate(
+  dplyr::mutate(
     month = as.Date(format(order_date, "%Y-%m-01"))
   ) %>%
-  group_by(account_id, month) %>%
-  summarize_if(is.numeric, sum) %>%
-  bind_rows(totals) %>%
-  ggplot(aes(month, price_paid, color = account_id)) +
-    geom_line(alpha = 0.5) +
-    geom_smooth(se = FALSE)
+  dplyr::group_by(account_id, month) %>%
+  dplyr::summarize_if(is.numeric, sum) %>%
+  dplyr::bind_rows(totals) %>%
+  ggplot2::ggplot(ggplot2::aes(month, price_paid, color = account_id)) +
+    ggplot2::geom_line(alpha = 0.5) +
+    ggplot2::geom_smooth(se = FALSE)
 ```
 
 ### Monthy order (by top users)
 
-```{r}
+```{r figure: monthly order by user}
 top_users <- orders %>%
-  group_by(user_id) %>%
-  summarize_if(is.numeric, sum) %>%
-  filter(collected >= sort(collected, decreasing = TRUE)[7]) %$%
+  dplyr::group_by(user_id) %>%
+  dplyr::summarize_if(is.numeric, sum) %>%
+  dplyr::filter(collected >= sort(collected, decreasing = TRUE)[7]) %$%
   user_id
 orders %>%
-  filter(user_id %in% top_users) %>%
-  mutate(
+  dplyr::filter(user_id %in% top_users) %>%
+  dplyr::mutate(
     month = as.Date(format(order_date, "%Y-%m-01"))
   ) %>%
-  group_by(user_id, month) %>%
-  summarize_if(is.numeric, sum) %>%
-  ggplot(aes(month, price_paid, color = user_id)) +
-    geom_line(alpha = 0.4) +
-    geom_smooth(se = FALSE) +
-    scale_y_continuous(limits = c(0, 1000), oob = function(x, lim) {return(x)})
+  dplyr::group_by(user_id, month) %>%
+  dplyr::summarize_if(is.numeric, sum) %>%
+  ggplot2::ggplot(ggplot2::aes(month, price_paid, color = user_id)) +
+    ggplot2::geom_line(alpha = 0.4) +
+    ggplot2::geom_smooth(se = FALSE) +
+    ggplot2::scale_y_continuous(
+      limits = c(0, 1000), oob = function(x, lim) {return(x)})
 ```
 
-```{r products, include=FALSE}
-pma_token <- pma_login(pma_user, pma_pass)
-products <- get_foodclub_products(overwrite = FALSE, token = pma_token) %>%
-  dplyr::filter(account_id != "bcf_internal") %>%
-  dplyr::mutate(
-    size_unit = size %>%
-      strsplit(" ") %>%
-      sapply("[", 2),
-    size = size %>%
-      strsplit(" ") %>%
-      sapply("[", 1) %>%
-      as.numeric()
-  )
+## Products
 
+```{r load products, include=FALSE}
+pma_token <- pma_login(pma_user, pma_pass)
+products <- pma_get_table_cache(
+    table = 'custom_view_archived_orders_bouldercoopfood',
+    path = file.path('cache', 'products.rds'),
+    hex = c('user_id', 'code'), token = token
+  ) %>%
+  dplyr::filter(account_id != "bcf_internal")
 # TODO: Seperate by account_id because some codes overlap (Equal Exchange, Frontier)
 # HACK: Exclude Frontier for now
 codes <- list(
@@ -293,55 +283,76 @@ codes <- list(
   "Laundry detergent" = c("laundry_detergent", "tide_powder")
 ) %>%
   sapply(function(x) {paste0("^", x, "$", collapse = "|")})
-
 products$category <- NULL
 for (i in seq_along(codes)) {
   index <- grepl(codes[[i]], products$code)
   products$category[index] <- names(codes)[i] 
 }
+```
 
-# By code
+### Order date range
+
+```{r print date range}
+products$order_date %>%
+  range() %>%
+  paste(collapse = " to ") %>%
+  cat()
+```
+
+### Cost of product (by code)
+
+```{r}
 products %>%
   dplyr::group_by(account_id, code) %>%
   dplyr::summarise(
-    description = description[1],
+    description = dplyr::first(description),
+    size = dplyr::first(size),
+    count = sum(qty),
     price = round(sum(qty * price))
-    # qty = sum(qty),
-    # size = sum(size),
-    # size_unit = size_unit[1]
   ) %>%
   dplyr::ungroup() %>%
   dplyr::mutate(
-    fraction = price / sum(price)
+    percent = 100 * price / sum(price)
   ) %>%
   dplyr::arrange(-price) %>%
-  readr::write_delim("products-code.tsv", delim = "\t")
+  knitr::kable(digits = 0, format.args = list(big.mark = ",")) %>%
+  kableExtra::kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
 
-# Not categorized
+### Cost of product (by category)
+
+```{r}
+products %>%
+  dplyr::filter(!is.na(category)) %>%
+  dplyr::group_by(category) %>%
+  dplyr::summarise(
+    price = round(sum(qty * price)),
+    # account_ids = paste(sort(unique(account_id)), collapse = ", "),
+    codes = paste(sort(unique(code)), collapse = ", ")
+  ) %>%
+  dplyr::mutate(
+    percent = 100 * price / sum(price)
+  ) %>%
+  dplyr::arrange(-price) %>%
+  dplyr::select(
+    category, price, percent, codes
+  ) %>%
+  knitr::kable(digits = 0, format.args = list(big.mark = ",")) %>%
+  kableExtra::kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+### Uncategorized products
+
+```{r}
 products %>%
   dplyr::filter(is.na(category)) %>%
   dplyr::group_by(account_id, code) %>%
   dplyr::summarise(
     description = description[1],
+    count = sum(qty),
     price = round(sum(qty * price))
-    # qty = sum(qty),
-    # size = sum(size),
-    # size_unit = size_unit[1]
-  ) %>%
-  dplyr::arrange(-price)
-
-# By category
-products %>%
-  dplyr::group_by(category) %>%
-  dplyr::summarise(
-    price = round(sum(qty * price)),
-    account_ids = paste(sort(unique(account_id)), collapse = ", "),
-    codes = paste(sort(unique(code)), collapse = ", ")
-  ) %>%
-  dplyr::mutate(
-    fraction = price / sum(price)
   ) %>%
   dplyr::arrange(-price) %>%
-  dplyr::select(category, price, fraction, account_ids, codes) %>%
-  readr::write_delim("products-category.tsv", delim = "\t")
+  knitr::kable(digits = 0, format.args = list(big.mark = ",")) %>%
+  kableExtra::kable_styling(bootstrap_options = "striped", full_width = FALSE)
 ```
