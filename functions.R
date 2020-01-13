@@ -839,8 +839,8 @@ go_parse_sizes <- function(sizes) {
   unit_changed <- !is.na(df$description) & !is.na(new_unit) & new_unit != unit
   df$description[unit_changed] %<>%
     paste("/", new_value[unit_changed], new_unit[unit_changed])
-  # Replace NA with "ea"
-  df$size[is.na(df$size)] <- "ea"
+  # Replace NA and "1 ea" with "ea"
+  df$size[is.na(df$size) | df$size == "1 ea"] <- "ea"
   df
 }
 

@@ -96,7 +96,7 @@ CODE <- 'Item ID'
 DESCRIPTION <- 'Item Description'
 ORIGIN <- 'Location'
 SIZE <- 'Stocking U/M'
-PRICE <- 'Commercial'
+PRICE <- 'Price'
 
 # Load functions
 source('functions.R')
