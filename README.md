@@ -36,8 +36,8 @@ The script below loads archived invoices from the Foodclub database for a partic
 
 ```r
 # Variables (change as needed)
-YEAR <- 2019  # Order year
-MONTH <- 12  # Order month
+YEAR <- 2020  # Order year
+MONTH <- 2  # Order month
 
 # Load functions
 source('functions.R')
@@ -89,7 +89,7 @@ Fix any issues like mispelled categories or erroneous product weight by editing 
 
 ```r
 # Variables (change as needed)
-PATH <- 'pricelist.xlsx'  # Path to new pricelist
+PATH <- '~/downloads/pricelist.xlsx'  # Path to new pricelist
 SKIP <- 7  # Number of rows before row with column names in pricelist
 # Column names in pricelist
 CODE <- 'Item ID'
@@ -121,6 +121,12 @@ sql <- go_build_sql(old, new, token = token)
 # If issues are found, fix them in the pricelist,
 # then repeat from step "Read new pricelist from file".
 sql
+# With size updates:
+sql %>%
+  extract(grepl('UPDATE.*size = ', .))
+# With category updates:
+sql %>%
+  extract(grepl('UPDATE.*category = ', .))
 
 # Update pricelist on Foodclub database
 sql %>%
