@@ -578,7 +578,7 @@ clean_foodclub_orders <- function(orders) {
     warning("order_subtotal != invoice")
   }
   err <- orders$invoice - (orders$pretax + orders$tax)
-  if (any(round(err, 2) != 0)) {
+  if (any(round(err, 2) > 0.01)) {
     warning("pretax + tax != invoice")
   }
   err <- orders$overall_order - (orders$order_subtotal + orders$member_fees)
