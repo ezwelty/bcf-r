@@ -24,8 +24,8 @@ R
 Once in R, install the required packages.
 
 ```r
-c('magrittr', tibble', 'dplyr', 'httr', 'xml2', 'readr', 'readxl', 'stringr',
-  'lubridate', 'rlang') %>%
+c('magrittr', 'tibble', 'dplyr', 'httr', 'xml2', 'readr', 'readxl', 'stringr',
+  'lubridate', 'rlang', 'rvest') %>%
   setdiff(row.names(installed.packages())) %>%
   install.packages()
 ```
