@@ -97,6 +97,7 @@ DESCRIPTION <- 'Item Description'
 ORIGIN <- 'Location'
 SIZE <- 'Stocking U/M'
 PRICE <- 'Commercial'
+NONFOOD <- 'Non Food'
 
 # Load functions
 source('functions.R')
@@ -105,31 +106,42 @@ source('functions.R')
 source('passwords.R')
 token <- pma_login(pma_user, pma_pass)
 
-# Pull old pricelist from the Foodclub database
+# Pull old pricelists from the Foodclub database
 old <- pma_get_table(table = 'private_bcf_goldenorganics', token = token)
+old_nf <- pma_get_table(table = 'private_bcf_goldenorganics_nf', token = token)
 
 # Read new pricelist from file
 new <- go_read_pricelist(
   path = PATH, skip = SKIP, code = CODE, description = DESCRIPTION,
   origin = ORIGIN, size = SIZE, price = PRICE
   )
+new_nf <- new %>%
+  dplyr::filter(category == NONFOOD)
+new %<>%
+  dplyr::filter(category != NONFOOD)
 
 # Generate SQL commands needed to update old pricelist to match new pricelist.
 sql <- go_build_sql(old, new, token = token)
+sql_nf <- go_build_sql(old_nf, new_nf, token = token)
 
 # Print and review SQL commands.
 # If issues are found, fix them in the pricelist,
 # then repeat from step "Read new pricelist from file".
 sql
+sql_nf
 # With size updates:
 sql %>%
+  extract(grepl('UPDATE.*size = ', .))
+sql_nf %>%
   extract(grepl('UPDATE.*size = ', .))
 # With category updates:
 sql %>%
   extract(grepl('UPDATE.*category = ', .))
+sql_nf %>%
+  extract(grepl('UPDATE.*category = ', .))
 
 # Update pricelist on Foodclub database
-sql %>%
+c(sql, sql_nf) %>%
   split(ceiling(seq_along(.) / 25)) %>%
   sapply(function(queries) {
     result <- queries %>%
