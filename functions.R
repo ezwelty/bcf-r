@@ -644,7 +644,7 @@ format_foodclub_orders <- function(orders, exempt = list(), food_tax = 0.0386, n
       collected = overall_order,
       food = dplyr::case_when(
         account_id == "bcf_frontiernaturalfoods" ~ ((tax / pretax) - nonfood_tax) / (food_tax - nonfood_tax),
-        account_id %in% c("bcf_costco_nf", "bcf_internal") ~ 0,
+        account_id %in% c("bcf_costco_nf", "bcf_goldenorganics_nf", "bcf_internal") ~ 0,
         TRUE ~ 1
       ),
       # Rate of sales tax owed to government
