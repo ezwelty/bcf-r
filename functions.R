@@ -765,17 +765,16 @@ go_read_pricelist <- function(
   }
   # Size (weight in pounds) inconsistent with item code
   has_pounds <- df$size %>%
-    grepl("[0-9]+ lb", .)
+    grepl("[0-9\\.]+ lb", .)
   pounds_from_size <- df$size[has_pounds] %>%
     stringr::str_match("^([0-9\\.]+) lb$") %>%
     .[, 2] %>%
-    as.numeric() %>%
-    round()
+    as.numeric()
   pounds_from_code <- df$code[has_pounds] %>%
     stringr::str_match("^[a-zA-Z]+([0-9]+)$") %>%
     .[, 2] %>%
     as.numeric()
-  inconsistent_size <- (pounds_from_size != pounds_from_code) %>%
+  inconsistent_size <- (round(pounds_from_size) != pounds_from_code) %>%
     replace(is.na(.), FALSE)
   if (any(inconsistent_size)) {
     w <- df[has_pounds, ][inconsistent_size, ] %>%
