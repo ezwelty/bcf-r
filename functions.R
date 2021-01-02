@@ -290,7 +290,7 @@ pma_write_import_csv <- function(x, path = "") {
 #' 
 #' Corrects errors in table `custom_view_dw_archived_invoice_user_totals_bouldercoopfood` so that the data follows the following format:
 #' 
-#' - `pretax`: Pre-tax total
+#' - `pretax` (Pre-tax total): `pretax` + `refunds`
 #' - `tax`: `pretax` * tax rate
 #' - `invoice`: `pretax` + `tax`
 #' - `refunds`: 0
@@ -559,6 +559,12 @@ clean_foodclub_orders <- function(orders) {
   mask <- abs(err) == 0.01
   orders$member_fees[mask] %<>%
     add(err[mask])
+
+  # ---- Apply refunds ----
+  
+  orders$pretax <- orders$pretax + orders$refunds
+  orders$invoice <- orders$invoice + orders$refunds
+  orders$refunds <- 0
   
   # ---- Check result ----
   
@@ -594,8 +600,8 @@ clean_foodclub_orders <- function(orders) {
   mask <- orders %>%
     with(account_id == "bcf_other" & order_date == as.Date("2018-05-07")) %>%
     not()
-  if (any(round(markup[mask], 2) > 0.15)) {
-    warning("Markup greater than 15%")
+  if (any(round(markup[mask], 2) > 0.25)) {
+    warning("Markup greater than 25%")
   }
   
   # ---- Return result ----
