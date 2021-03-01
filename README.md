@@ -36,7 +36,7 @@ The script below loads archived invoices from the Foodclub database for a partic
 
 ```r
 # Variables (change as needed)
-YEAR <- 2020  # Order year
+YEAR <- 2021  # Order year
 MONTH <- 2  # Order month
 
 # Load functions
