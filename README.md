@@ -24,10 +24,10 @@ R
 Once in R, install the required packages.
 
 ```r
-c('magrittr', 'tibble', 'dplyr', 'httr', 'xml2', 'readr', 'readxl', 'stringr',
-  'lubridate', 'rlang', 'rvest') %>%
-  setdiff(row.names(installed.packages())) %>%
-  install.packages()
+required <- c('magrittr', 'tibble', 'dplyr', 'httr', 'xml2', 'readr', 'readxl', 'stringr',
+  'lubridate', 'rlang', 'rvest')
+missing <- setdiff(required, row.names(installed.packages()))
+install.packages(missing)
 ```
 
 ## Update orders data
@@ -35,6 +35,8 @@ c('magrittr', 'tibble', 'dplyr', 'httr', 'xml2', 'readr', 'readxl', 'stringr',
 The script below loads archived invoices from the Foodclub database for a particular month and formats them for use in the Orders tab of the bookkeeping spreadsheet. The result is printed to the terminal window. Simply select and copy the output and paste it to the end of the sheet.
 
 ```r
+library(magrittr)
+
 # Variables (change as needed)
 YEAR <- 2021  # Order year
 MONTH <- 2  # Order month
@@ -88,6 +90,8 @@ By request, Golden Organics emails a new pricelist (as an Excel spreadsheet) rou
 Fix any issues like mispelled categories or erroneous product weight by editing the spreadsheet, then rerun the script starting from the step "Read new pricelist from file".
 
 ```r
+library(magrittr)
+
 # Variables (change as needed)
 PATH <- '~/downloads/pricelist.xlsx'  # Path to new pricelist
 SKIP <- 7  # Number of rows before row with column names in pricelist
@@ -155,6 +159,8 @@ c(sql, sql_nf) %>%
 ## Count Costco out-of-stock
 
 ```r
+library(magrittr)
+
 # Load functions
 source('functions.R')
 
