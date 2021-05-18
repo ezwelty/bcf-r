@@ -9,25 +9,19 @@ git clone https://github.com/ezwelty/bcf-r.git
 cd bcf-r
 ```
 
-Copy the template passwords file to `passwords.R` and update this new file with your credentials.
+Copy the template passwords file to `passwords.R`.
 
 ```bash
 cp passwords.R.template passwords.R
 ```
 
-Start R.
+And update `passwords.R` with your credentials.
 
-```bash
-R
-```
+Launch the project in R by running `bcr-r.Rproj`.
+Once in the R console, install any missing dependencies using [`renv`](https://rstudio.github.io/renv).
 
-Once in R, install the required packages.
-
-```r
-required <- c('magrittr', 'tibble', 'dplyr', 'httr', 'xml2', 'readr', 'readxl', 'stringr',
-  'lubridate', 'rlang', 'rvest')
-missing <- setdiff(required, row.names(installed.packages()))
-install.packages(missing)
+```R
+renv::restore()
 ```
 
 ## Update orders data
